@@ -97,11 +97,12 @@ func TestDetectOwnerNameWithoutPlus(t *testing.T) {
 	assert.Equal(t, expected, res)
 }
 
-func TestDetectFlexConsumptionMissingResourceGroup(t *testing.T) {
-	// Flex Consumption does not expose WEBSITE_RESOURCE_GROUP, so
-	// cloud.resource_id and azure.resource_group.name must be omitted
-	// rather than emitted with a partial value; cloud.account.id is still
-	// derived from WEBSITE_OWNER_NAME independently.
+func TestDetectFlexConsumptionResourceGroupFromOwnerName(t *testing.T) {
+	// Flex Consumption does not expose WEBSITE_RESOURCE_GROUP, but the
+	// resource group is still embedded in WEBSITE_OWNER_NAME
+	// ("<subscription-id>+<resource-group>-<region>webspace"), so
+	// cloud.resource_id and azure.resource_group.name should be derived
+	// from there instead of being omitted.
 	t.Setenv(functionsWorkerRuntimeEnvVar, "dotnet-isolated")
 	t.Setenv(websiteSiteNameEnvVar, "my-function-app")
 	t.Setenv(websiteOwnerNameEnvVar, "11111111-1111-1111-1111-111111111111+my-rg-EastUSwebspace")
@@ -117,8 +118,70 @@ func TestDetectFlexConsumptionMissingResourceGroup(t *testing.T) {
 		semconv.CloudProviderAzure,
 		semconv.CloudPlatformAzureFunctions,
 		semconv.ServiceName("my-function-app"),
+		semconv.AzureResourceGroupName("my-rg"),
 		semconv.CloudAccountID("11111111-1111-1111-1111-111111111111"),
+		semconv.CloudResourceID("/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/my-rg/providers/Microsoft.Web/sites/my-function-app"),
 		semconv.FaaSInstance("pod-abc123"),
+	)
+	assert.Equal(t, expected, res)
+}
+
+func TestDetectWebsiteResourceGroupTakesPrecedenceOverOwnerName(t *testing.T) {
+	t.Setenv(functionsWorkerRuntimeEnvVar, "dotnet-isolated")
+	t.Setenv(websiteSiteNameEnvVar, "my-function-app")
+	t.Setenv(websiteResourceGroupEnvVar, "explicit-rg")
+	t.Setenv(websiteOwnerNameEnvVar, "11111111-1111-1111-1111-111111111111+owner-name-rg-EastUSwebspace")
+
+	detector := ResourceDetector{}
+	res, err := detector.Detect(t.Context())
+
+	assert.NoError(t, err)
+	expected := resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.CloudProviderAzure,
+		semconv.CloudPlatformAzureFunctions,
+		semconv.ServiceName("my-function-app"),
+		semconv.AzureResourceGroupName("explicit-rg"),
+		semconv.CloudAccountID("11111111-1111-1111-1111-111111111111"),
+		semconv.CloudResourceID("/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/explicit-rg/providers/Microsoft.Web/sites/my-function-app"),
+	)
+	assert.Equal(t, expected, res)
+}
+
+func TestDetectOwnerNameMalformedResourceGroupSuffixOmitted(t *testing.T) {
+	t.Setenv(functionsWorkerRuntimeEnvVar, "dotnet-isolated")
+	t.Setenv(websiteSiteNameEnvVar, "my-function-app")
+	t.Setenv(websiteOwnerNameEnvVar, "11111111-1111-1111-1111-111111111111+my-rg-EastUS")
+
+	detector := ResourceDetector{}
+	res, err := detector.Detect(t.Context())
+
+	assert.NoError(t, err)
+	expected := resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.CloudProviderAzure,
+		semconv.CloudPlatformAzureFunctions,
+		semconv.ServiceName("my-function-app"),
+		semconv.CloudAccountID("11111111-1111-1111-1111-111111111111"),
+	)
+	assert.Equal(t, expected, res)
+}
+
+func TestDetectOwnerNameNoHyphenBeforeRegionOmitted(t *testing.T) {
+	t.Setenv(functionsWorkerRuntimeEnvVar, "dotnet-isolated")
+	t.Setenv(websiteSiteNameEnvVar, "my-function-app")
+	t.Setenv(websiteOwnerNameEnvVar, "11111111-1111-1111-1111-111111111111+EastUSwebspace")
+
+	detector := ResourceDetector{}
+	res, err := detector.Detect(t.Context())
+
+	assert.NoError(t, err)
+	expected := resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.CloudProviderAzure,
+		semconv.CloudPlatformAzureFunctions,
+		semconv.ServiceName("my-function-app"),
+		semconv.CloudAccountID("11111111-1111-1111-1111-111111111111"),
 	)
 	assert.Equal(t, expected, res)
 }

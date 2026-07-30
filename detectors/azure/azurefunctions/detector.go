@@ -84,17 +84,20 @@ func (d *ResourceDetector) Detect(context.Context) (*resource.Resource, error) {
 		attrs = append(attrs, semconv.ServiceName(siteName))
 	}
 
+	// WEBSITE_OWNER_NAME has the form "<subscription-id>+<resource-group>-<region>webspace".
+	ownerName := os.Getenv(websiteOwnerNameEnvVar)
+	subscriptionID, ownerNameResourceGroup := parseWebsiteOwnerName(ownerName)
+
+	// Flex Consumption does not expose WEBSITE_RESOURCE_GROUP (Azure/azure-functions-host#11838),
+	// so fall back to the resource group embedded in WEBSITE_OWNER_NAME.
 	resourceGroup := os.Getenv(websiteResourceGroupEnvVar)
+	if resourceGroup == "" {
+		resourceGroup = ownerNameResourceGroup
+	}
 	if resourceGroup != "" {
 		attrs = append(attrs, semconv.AzureResourceGroupName(resourceGroup))
 	}
 
-	// WEBSITE_OWNER_NAME has the form "<subscription-id>+<resource-group>-<region>webspace";
-	// the subscription ID is the segment before the first '+'.
-	subscriptionID := os.Getenv(websiteOwnerNameEnvVar)
-	if idx := strings.Index(subscriptionID, "+"); idx >= 0 {
-		subscriptionID = subscriptionID[:idx]
-	}
 	if subscriptionID != "" {
 		attrs = append(attrs, semconv.CloudAccountID(subscriptionID))
 	}
@@ -124,6 +127,31 @@ func (d *ResourceDetector) Detect(context.Context) (*resource.Resource, error) {
 	}
 
 	return resource.NewWithAttributes(semconv.SchemaURL, attrs...), nil
+}
+
+// parseWebsiteOwnerName splits WEBSITE_OWNER_NAME
+// ("<subscription-id>+<resource-group>-<region>webspace") into its
+// subscription ID and resource group. The resource group is only returned
+// if the value ends in "webspace" and has a '-' separating it from the
+// region; Azure region codes (e.g. "EastUS") never contain hyphens, so the
+// last '-' before that suffix is the resource-group/region boundary.
+// Either return value is empty if it cannot be determined.
+func parseWebsiteOwnerName(ownerName string) (subscriptionID, resourceGroup string) {
+	subscriptionID, after, found := strings.Cut(ownerName, "+")
+	if !found {
+		return ownerName, ""
+	}
+
+	rest, ok := strings.CutSuffix(after, "webspace")
+	if !ok {
+		return subscriptionID, ""
+	}
+
+	sep := strings.LastIndex(rest, "-")
+	if sep < 0 {
+		return subscriptionID, ""
+	}
+	return subscriptionID, rest[:sep]
 }
 
 // functionsInstanceID resolves the platform instance id, branching by

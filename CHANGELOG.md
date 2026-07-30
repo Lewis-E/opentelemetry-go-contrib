@@ -38,6 +38,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Populate `azure.resource_group.name` and `cloud.resource_id` in `go.opentelemetry.io/contrib/detectors/azure/azurefunctions` on Azure Functions Flex Consumption by parsing the resource group out of `WEBSITE_OWNER_NAME`, which Flex Consumption exposes in place of `WEBSITE_RESOURCE_GROUP`.
 - Fix Prometheus reader resource label filter configuration in `go.opentelemetry.io/contrib/otelconf/v0.2.0`. (#9045)
 - Apply `resource.detection/development.attributes.included` and `excluded` filtering to resource detector attributes in `go.opentelemetry.io/contrib/otelconf/x`. (#9131)
 - Honor the context configured with `WithContext` when constructing resources in `go.opentelemetry.io/contrib/otelconf` and `go.opentelemetry.io/contrib/otelconf/x`. (#9160)
