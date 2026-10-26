@@ -32,6 +32,7 @@ func TestReturnsEmptyIfNoFunctionsMarker(t *testing.T) {
 func TestDetectGatesOnExtensionVersion(t *testing.T) {
 	t.Setenv(functionsWorkerRuntimeEnvVar, "")
 	t.Setenv(functionsExtensionVersionEnvVar, "~4")
+	t.Setenv(computerNameEnvVar, "")
 	t.Setenv(websiteSiteNameEnvVar, "my-function-app")
 
 	detector := ResourceDetector{}
@@ -54,6 +55,7 @@ func TestDetectFullAttributeSet(t *testing.T) {
 	t.Setenv(websiteResourceGroupEnvVar, "my-rg")
 	t.Setenv(websiteOwnerNameEnvVar, "11111111-1111-1111-1111-111111111111+my-rg-EastUSwebspace")
 	t.Setenv(websiteInstanceIDEnvVar, "a1b2c3")
+	t.Setenv(computerNameEnvVar, "ln1sdlwk0006CQ")
 	t.Setenv(websiteSlotNameEnvVar, "staging")
 
 	detector := ResourceDetector{}
@@ -70,6 +72,7 @@ func TestDetectFullAttributeSet(t *testing.T) {
 		semconv.CloudAccountID("11111111-1111-1111-1111-111111111111"),
 		semconv.CloudResourceID("/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/my-rg/providers/Microsoft.Web/sites/my-function-app"),
 		semconv.FaaSInstance("a1b2c3"),
+		instanceNameKey.String("ln1sdlwk0006CQ"),
 		semconv.DeploymentEnvironmentNameKey.String("staging"),
 	)
 	assert.Equal(t, expected, res)
@@ -80,6 +83,7 @@ func TestDetectOwnerNameWithoutPlus(t *testing.T) {
 	t.Setenv(websiteSiteNameEnvVar, "my-function-app")
 	t.Setenv(websiteResourceGroupEnvVar, "my-rg")
 	t.Setenv(websiteOwnerNameEnvVar, "11111111-1111-1111-1111-111111111111")
+	t.Setenv(computerNameEnvVar, "")
 
 	detector := ResourceDetector{}
 	res, err := detector.Detect(t.Context())
@@ -105,6 +109,7 @@ func TestDetectFlexConsumptionMissingResourceGroup(t *testing.T) {
 	t.Setenv(functionsWorkerRuntimeEnvVar, "dotnet-isolated")
 	t.Setenv(websiteSiteNameEnvVar, "my-function-app")
 	t.Setenv(websiteOwnerNameEnvVar, "11111111-1111-1111-1111-111111111111+my-rg-EastUSwebspace")
+	t.Setenv(computerNameEnvVar, "")
 	t.Setenv(websitePodNameEnvVar, "pod-abc123")
 	t.Setenv(containerNameEnvVar, "should-not-be-used")
 
@@ -119,6 +124,7 @@ func TestDetectFlexConsumptionMissingResourceGroup(t *testing.T) {
 		semconv.ServiceName("my-function-app"),
 		semconv.CloudAccountID("11111111-1111-1111-1111-111111111111"),
 		semconv.FaaSInstance("pod-abc123"),
+		instanceNameKey.String("pod-abc123"),
 	)
 	assert.Equal(t, expected, res)
 }
@@ -126,6 +132,7 @@ func TestDetectFlexConsumptionMissingResourceGroup(t *testing.T) {
 func TestFunctionsInstanceIDFallsBackToContainerName(t *testing.T) {
 	t.Setenv(functionsWorkerRuntimeEnvVar, "dotnet-isolated")
 	t.Setenv(websiteSiteNameEnvVar, "my-function-app")
+	t.Setenv(computerNameEnvVar, "")
 	t.Setenv(containerNameEnvVar, "container-xyz")
 
 	detector := ResourceDetector{}
@@ -140,6 +147,74 @@ func TestFunctionsInstanceIDFallsBackToContainerName(t *testing.T) {
 		semconv.FaaSInstance("container-xyz"),
 	)
 	assert.Equal(t, expected, res)
+}
+
+func TestFunctionsInstanceName(t *testing.T) {
+	tests := []struct {
+		name          string
+		computerName  string
+		podName       string
+		containerName string
+		want          string
+	}{
+		{
+			name:          "COMPUTERNAME wins",
+			computerName:  "pl0mdlwk0002M1",
+			podName:       "pod-abc123",
+			containerName: "container-xyz",
+			want:          "pl0mdlwk0002M1",
+		},
+		{
+			name:          "falls back to WEBSITE_POD_NAME",
+			podName:       "pod-abc123",
+			containerName: "container-xyz",
+			want:          "pod-abc123",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(functionsWorkerRuntimeEnvVar, "dotnet-isolated")
+			t.Setenv(computerNameEnvVar, tt.computerName)
+			t.Setenv(websitePodNameEnvVar, tt.podName)
+			t.Setenv(containerNameEnvVar, tt.containerName)
+
+			res, err := NewResourceDetector().Detect(t.Context())
+
+			assert.NoError(t, err)
+			got, ok := res.Set().Value(instanceNameKey)
+			assert.True(t, ok)
+			assert.Equal(t, tt.want, got.AsString())
+		})
+	}
+}
+
+func TestFunctionsInstanceNameIgnoresContainerName(t *testing.T) {
+	t.Setenv(functionsWorkerRuntimeEnvVar, "dotnet-isolated")
+	t.Setenv(computerNameEnvVar, "")
+	t.Setenv(websitePodNameEnvVar, "")
+	t.Setenv(containerNameEnvVar, "container-xyz")
+
+	res, err := NewResourceDetector().Detect(t.Context())
+
+	assert.NoError(t, err)
+	assert.False(t, res.Set().HasValue(instanceNameKey))
+}
+
+func TestFaaSInstanceIgnoresComputerName(t *testing.T) {
+	t.Setenv(functionsWorkerRuntimeEnvVar, "dotnet-isolated")
+	t.Setenv(websiteInstanceIDEnvVar, "a1b2c3")
+	t.Setenv(computerNameEnvVar, "pl0mdlwk0002M1")
+
+	res, err := NewResourceDetector().Detect(t.Context())
+
+	assert.NoError(t, err)
+	faasInstance, ok := res.Set().Value(semconv.FaaSInstanceKey)
+	assert.True(t, ok)
+	assert.Equal(t, "a1b2c3", faasInstance.AsString())
+	instanceName, ok := res.Set().Value(instanceNameKey)
+	assert.True(t, ok)
+	assert.Equal(t, "pl0mdlwk0002M1", instanceName.AsString())
 }
 
 func TestWithAttributeFilter(t *testing.T) {

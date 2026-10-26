@@ -11,9 +11,9 @@ FUNCTIONS_WORKER_RUNTIME or FUNCTIONS_EXTENSION_VERSION is also set,
 since Azure Functions runs on the same App Service infrastructure.
 
 According to semantic conventions for [cloud], [service], and [deployment]
-attributes, and a custom attribute for the Azure resource group and
-instance id, the following attributes are added when running on Azure App
-Service:
+attributes, and custom attributes for the Azure resource group, instance id,
+and instance name, the following attributes are added when running on Azure
+App Service:
 
   - cloud.provider
   - cloud.platform
@@ -23,7 +23,12 @@ Service:
   - service.name
   - azure.resource_group.name
   - azure.app_service.instance.id
+  - azure.app_service.instance.name
   - deployment.environment.name
+
+azure.app_service.instance.name comes from the first non-empty value of
+COMPUTERNAME and WEBSITE_POD_NAME, emitted as Azure sets it, which is the
+name Azure Monitor reports in its Instance dimension.
 
 [cloud]: https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/cloud.md
 [service]: https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/service.md

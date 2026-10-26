@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
@@ -23,6 +24,9 @@ func setAppServiceEnv(t *testing.T) {
 	t.Setenv(regionEnvVar, "eastus")
 	t.Setenv(slotNameEnvVar, "staging")
 	t.Setenv(instanceIDEnvVar, "a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890")
+	t.Setenv(computerNameEnvVar, "ln1xsdlwk0004SJ")
+	t.Setenv(podNameEnvVar, "")
+	t.Setenv("CONTAINER_NAME", "")
 	// Not a Function; keep the success paths deterministic regardless of the
 	// ambient environment.
 	t.Setenv(functionsWorkerRuntimeEnvVar, "")
@@ -39,6 +43,7 @@ func fullExpectedAttrs() []attribute.KeyValue {
 		semconv.AzureResourceGroupName("my-rg"),
 		semconv.CloudRegion("eastus"),
 		semconv.DeploymentEnvironmentNameKey.String("staging"),
+		instanceNameKey.String("ln1xsdlwk0004SJ"),
 		instanceIDKey.String("a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890"),
 	}
 }
@@ -83,6 +88,7 @@ func TestDetectMissingInstanceID(t *testing.T) {
 		semconv.AzureResourceGroupName("my-rg"),
 		semconv.CloudRegion("eastus"),
 		semconv.DeploymentEnvironmentNameKey.String("staging"),
+		instanceNameKey.String("ln1xsdlwk0004SJ"),
 	)
 	res, err := (&ResourceDetector{}).Detect(t.Context())
 
@@ -97,6 +103,9 @@ func TestDetectMissingOptionalEnvVars(t *testing.T) {
 	t.Setenv(regionEnvVar, "")
 	t.Setenv(slotNameEnvVar, "")
 	t.Setenv(instanceIDEnvVar, "")
+	t.Setenv(computerNameEnvVar, "")
+	t.Setenv(podNameEnvVar, "")
+	t.Setenv("CONTAINER_NAME", "container-1")
 	t.Setenv(functionsWorkerRuntimeEnvVar, "")
 	t.Setenv(functionsExtensionVersionEnvVar, "")
 
@@ -105,7 +114,34 @@ func TestDetectMissingOptionalEnvVars(t *testing.T) {
 	assert.ErrorIs(t, err, resource.ErrPartialResource)
 	attrs := res.Attributes()
 	assert.NotContains(t, attrs, semconv.CloudRegion("eastus"))
+	assert.False(t, res.Set().HasValue(instanceNameKey))
 	assert.Contains(t, attrs, semconv.ServiceName("example-app-name"))
+}
+
+func TestDetectInstanceNameFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		computerName string
+		podName      string
+		want         string
+	}{
+		{name: "computer name wins", computerName: "ln1xsdlwk0004SJ", podName: "pod-1", want: "ln1xsdlwk0004SJ"},
+		{name: "pod name", podName: "pod-1", want: "pod-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setAppServiceEnv(t)
+			t.Setenv(computerNameEnvVar, tc.computerName)
+			t.Setenv(podNameEnvVar, tc.podName)
+			t.Setenv("CONTAINER_NAME", "container-1")
+
+			res, err := (&ResourceDetector{}).Detect(t.Context())
+
+			require.NoError(t, err)
+			got, ok := res.Set().Value(instanceNameKey)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, got.AsString())
+		})
+	}
 }
 
 func TestWithAttributeFilter(t *testing.T) {

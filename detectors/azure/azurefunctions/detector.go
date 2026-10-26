@@ -25,6 +25,9 @@ const (
 	websitePodNameEnvVar            = "WEBSITE_POD_NAME"
 	containerNameEnvVar             = "CONTAINER_NAME"
 	websiteSlotNameEnvVar           = "WEBSITE_SLOT_NAME"
+	computerNameEnvVar              = "COMPUTERNAME"
+
+	instanceNameKey = attribute.Key("azure.app_service.instance.name")
 )
 
 type config struct {
@@ -109,6 +112,10 @@ func (d *ResourceDetector) Detect(context.Context) (*resource.Resource, error) {
 		attrs = append(attrs, semconv.FaaSInstance(instanceID))
 	}
 
+	if instanceName := functionsInstanceName(); instanceName != "" {
+		attrs = append(attrs, instanceNameKey.String(instanceName))
+	}
+
 	if slotName := os.Getenv(websiteSlotNameEnvVar); slotName != "" {
 		attrs = append(attrs, semconv.DeploymentEnvironmentNameKey.String(slotName))
 	}
@@ -133,6 +140,20 @@ func (d *ResourceDetector) Detect(context.Context) (*resource.Resource, error) {
 // Consumption.
 func functionsInstanceID() string {
 	for _, envVar := range []string{websiteInstanceIDEnvVar, websitePodNameEnvVar, containerNameEnvVar} {
+		if v := os.Getenv(envVar); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// functionsInstanceName resolves the instance name that Azure Monitor
+// reports in its Instance dimension: COMPUTERNAME on Windows Consumption,
+// Elastic Premium, and Dedicated, falling back to WEBSITE_POD_NAME on Flex
+// and Linux Consumption, where COMPUTERNAME is empty. Unlike
+// functionsInstanceID, it never reads WEBSITE_INSTANCE_ID or CONTAINER_NAME.
+func functionsInstanceName() string {
+	for _, envVar := range []string{computerNameEnvVar, websitePodNameEnvVar} {
 		if v := os.Getenv(envVar); v != "" {
 			return v
 		}

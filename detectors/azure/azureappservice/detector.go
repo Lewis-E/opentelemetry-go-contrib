@@ -21,13 +21,19 @@ const (
 	regionEnvVar        = "REGION_NAME"
 	slotNameEnvVar      = "WEBSITE_SLOT_NAME"
 	instanceIDEnvVar    = "WEBSITE_INSTANCE_ID"
+	// COMPUTERNAME is the name of the worker machine hosting this app instance.
+	computerNameEnvVar = "COMPUTERNAME"
+	// WEBSITE_POD_NAME names the instance on pod-based plans, where
+	// COMPUTERNAME is empty.
+	podNameEnvVar = "WEBSITE_POD_NAME"
 
 	// Some Azure Functions run on the same App Service infrastructure.
 	// We need to distinguish Functions apps from App Service web apps.
 	functionsWorkerRuntimeEnvVar    = "FUNCTIONS_WORKER_RUNTIME"
 	functionsExtensionVersionEnvVar = "FUNCTIONS_EXTENSION_VERSION"
 
-	instanceIDKey = attribute.Key("azure.app_service.instance.id")
+	instanceIDKey   = attribute.Key("azure.app_service.instance.id")
+	instanceNameKey = attribute.Key("azure.app_service.instance.name")
 )
 
 type config struct {
@@ -104,6 +110,9 @@ func (d *ResourceDetector) Detect(context.Context) (*resource.Resource, error) {
 	if slot := os.Getenv(slotNameEnvVar); slot != "" {
 		attrs = append(attrs, semconv.DeploymentEnvironmentNameKey.String(slot))
 	}
+	if instanceName := appServiceInstanceName(); instanceName != "" {
+		attrs = append(attrs, instanceNameKey.String(instanceName))
+	}
 
 	var partialErr error
 	if instanceID := os.Getenv(instanceIDEnvVar); instanceID != "" {
@@ -123,4 +132,16 @@ func (d *ResourceDetector) Detect(context.Context) (*resource.Resource, error) {
 	}
 
 	return resource.NewWithAttributes(semconv.SchemaURL, attrs...), partialErr
+}
+
+// appServiceInstanceName returns the name Azure Monitor reports in its
+// Instance dimension: the first non-empty value of COMPUTERNAME and
+// WEBSITE_POD_NAME, unchanged.
+func appServiceInstanceName() string {
+	for _, envVar := range []string{computerNameEnvVar, podNameEnvVar} {
+		if v := os.Getenv(envVar); v != "" {
+			return v
+		}
+	}
+	return ""
 }
